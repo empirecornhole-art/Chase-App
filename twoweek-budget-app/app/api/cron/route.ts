@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/server';
-import { syncHousehold } from '@/app/api/sync/route';
+import { syncHousehold } from '@/lib/sync';
 
 // Called automatically once a day by Vercel Cron (see vercel.json).
 // Protected by CRON_SECRET so nobody else can trigger it.
