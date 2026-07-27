@@ -1,0 +1,13 @@
+{
+  "name": "Two-Week Ledger",
+  "short_name": "Budget",
+  "description": "Track spend against your budget, one pay period at a time.",
+  "start_url": "/dashboard",
+  "display": "standalone",
+  "background_color": "#F6F4EF",
+  "theme_color": "#2F5D45",
+  "icons": [
+    { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}
