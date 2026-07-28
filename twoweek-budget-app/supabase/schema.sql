@@ -53,6 +53,7 @@ create table if not exists transactions (
   category text not null default 'Uncategorized',
   account_name text,
   pending boolean not null default false,
+  excluded boolean not null default false,
   created_at timestamptz not null default now(),
   unique (household_id, simplefin_id)
 );

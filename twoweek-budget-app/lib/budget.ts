@@ -13,6 +13,7 @@ export interface Txn {
   merchant: string | null;
   category: string;
   pending: boolean;
+  excluded: boolean;
 }
 
 export interface CategoryBudget {
@@ -46,14 +47,19 @@ export function periodSpend(txns: Txn[], period: BudgetPeriod): number {
       (t) =>
         t.posted_at >= period.start_date &&
         t.posted_at <= period.end_date &&
-        t.amount > 0 // positive = money out, per our stored convention
+        t.amount > 0 && // positive = money out, per our stored convention
+        !t.excluded
     )
     .reduce((sum, t) => sum + t.amount, 0);
 }
 
 export function categoryBreakdown(txns: Txn[], period: BudgetPeriod): { category: string; total: number }[] {
   const inPeriod = txns.filter(
-    (t) => t.posted_at >= period.start_date && t.posted_at <= period.end_date && t.amount > 0
+    (t) =>
+      t.posted_at >= period.start_date &&
+      t.posted_at <= period.end_date &&
+      t.amount > 0 &&
+      !t.excluded
   );
   const map = new Map<string, number>();
   for (const t of inPeriod) {

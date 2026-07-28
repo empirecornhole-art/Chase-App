@@ -120,6 +120,15 @@ export default function DashboardClient({
   const remaining = viewedPeriod ? viewedPeriod.amount - spend : 0;
   const pctUsed = viewedPeriod ? Math.min(100, (spend / viewedPeriod.amount) * 100) : 0;
   const overBudget = remaining < 0;
+
+  const daysRemaining = useMemo(() => {
+    if (!viewedPeriod) return 0;
+    const end = new Date(viewedPeriod.end_date + 'T00:00:00');
+    const now = new Date(today + 'T00:00:00');
+    return Math.round((end.getTime() - now.getTime()) / (24 * 60 * 60 * 1000));
+  }, [viewedPeriod, today]);
+
+  const showHeadsUp = !overBudget && pctUsed >= 80 && daysRemaining >= 3;
   const breakdown = viewedPeriod ? categoryBreakdown(transactions, viewedPeriod) : [];
 
   const periodTxns = useMemo(
@@ -429,6 +438,13 @@ export default function DashboardClient({
                 style={{ width: `${pctUsed}%` }}
               />
             </div>
+
+            {showHeadsUp && (
+              <p className="mt-3 text-xs bg-ledger-gold/10 text-ledger-gold border border-ledger-gold/30 rounded-sm px-3 py-2">
+                Heads up — you've used {Math.round(pctUsed)}% of your budget with {daysRemaining} days
+                left in this period.
+              </p>
+            )}
           </section>
         ) : (
           <section className="card p-6 text-center">
@@ -544,19 +560,35 @@ export default function DashboardClient({
         )}
 
         {/* Export */}
-        <section className="card p-6 flex items-center justify-between">
-          <div>
-            <h2 className="font-display text-lg text-ledger-greenDeep">Budget history</h2>
-            <p className="text-xs text-ledger-muted mt-1">
-              Every period's budget vs. actual spend, as a spreadsheet.
-            </p>
+        <section className="card p-6 space-y-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="font-display text-lg text-ledger-greenDeep">Budget history</h2>
+              <p className="text-xs text-ledger-muted mt-1">
+                Every period's budget vs. actual spend, as a spreadsheet.
+              </p>
+            </div>
+            <a
+              href="/api/export"
+              className="border border-ledger-rule rounded-sm px-3 py-1.5 text-sm bg-white hover:border-ledger-green transition-colors whitespace-nowrap"
+            >
+              Export CSV
+            </a>
           </div>
-          <a
-            href="/api/export"
-            className="border border-ledger-rule rounded-sm px-3 py-1.5 text-sm bg-white hover:border-ledger-green transition-colors"
-          >
-            Export CSV
-          </a>
+          <div className="flex items-center justify-between pt-4 border-t border-ledger-rule">
+            <div>
+              <h2 className="font-display text-lg text-ledger-greenDeep">All transactions</h2>
+              <p className="text-xs text-ledger-muted mt-1">
+                Every individual transaction ever synced, as a spreadsheet.
+              </p>
+            </div>
+            <a
+              href="/api/export/transactions"
+              className="border border-ledger-rule rounded-sm px-3 py-1.5 text-sm bg-white hover:border-ledger-green transition-colors whitespace-nowrap"
+            >
+              Export CSV
+            </a>
+          </div>
         </section>
       </div>
     </main>
@@ -692,6 +724,7 @@ function TransactionRow({
   const [newCategory, setNewCategory] = useState('');
   const [remember, setRemember] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [togglingExclude, setTogglingExclude] = useState(false);
 
   async function saveCategory(category: string) {
     const trimmed = category.trim();
@@ -719,19 +752,35 @@ function TransactionRow({
     onSaved();
   }
 
+  async function toggleExcluded() {
+    setTogglingExclude(true);
+    await supabase.from('transactions').update({ excluded: !txn.excluded }).eq('id', txn.id);
+    setTogglingExclude(false);
+    onSaved();
+  }
+
   return (
-    <div className="py-2.5 flex items-center justify-between text-sm gap-3">
+    <div className={`py-2.5 flex items-center justify-between text-sm gap-3 ${txn.excluded ? 'opacity-50' : ''}`}>
       <div className="min-w-0 flex-1">
-        <p className="truncate">{txn.description}</p>
+        <p className={`truncate ${txn.excluded ? 'line-through' : ''}`}>{txn.description}</p>
 
         {!editing ? (
-          <button
-            onClick={() => setEditing(true)}
-            className="text-xs text-ledger-muted hover:text-ledger-green underline decoration-dotted"
-          >
-            {txn.category}
-            {txn.pending ? ' · pending' : ''} · {txn.posted_at}
-          </button>
+          <div className="flex items-center gap-2 flex-wrap">
+            <button
+              onClick={() => setEditing(true)}
+              className="text-xs text-ledger-muted hover:text-ledger-green underline decoration-dotted"
+            >
+              {txn.category}
+              {txn.pending ? ' · pending' : ''} · {txn.posted_at}
+            </button>
+            <button
+              onClick={toggleExcluded}
+              disabled={togglingExclude}
+              className="text-[11px] text-ledger-muted hover:text-ledger-rust"
+            >
+              {txn.excluded ? '· Include in budget' : '· Exclude from budget'}
+            </button>
+          </div>
         ) : (
           <div className="mt-1.5 space-y-1.5">
             {!addingNew ? (

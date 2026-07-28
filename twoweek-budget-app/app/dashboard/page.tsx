@@ -42,7 +42,7 @@ export default async function DashboardPage() {
 
   const { data: transactions } = await supabase
     .from('transactions')
-    .select('id, posted_at, amount, description, merchant, category, pending')
+    .select('id, posted_at, amount, description, merchant, category, pending, excluded')
     .eq('household_id', householdId)
     .order('posted_at', { ascending: false })
     .limit(500);

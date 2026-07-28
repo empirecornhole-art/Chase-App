@@ -1,6 +1,5 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
-import { periodSpend, fmtMoney, type BudgetPeriod, type Txn } from '@/lib/budget';
 
 function csvEscape(value: string | number): string {
   const s = String(value);
@@ -21,36 +20,29 @@ export async function GET() {
     .single();
   if (!membership) return NextResponse.json({ error: 'No household' }, { status: 404 });
 
-  const { data: periods } = await supabase
-    .from('budget_periods')
-    .select('id, start_date, end_date, amount')
-    .eq('household_id', membership.household_id)
-    .order('start_date', { ascending: true });
-
   const { data: txns } = await supabase
     .from('transactions')
-    .select('id, posted_at, amount, description, merchant, category, pending, excluded')
-    .eq('household_id', membership.household_id);
+    .select('posted_at, description, merchant, category, amount, pending, excluded')
+    .eq('household_id', membership.household_id)
+    .order('posted_at', { ascending: false });
 
   const rows: string[] = [];
   rows.push(
-    ['Period Start', 'Period End', 'Budget', 'Actual Spend', 'Difference', 'Status']
+    ['Date', 'Description', 'Merchant', 'Category', 'Amount', 'Pending', 'Excluded from budget']
       .map(csvEscape)
       .join(',')
   );
 
-  for (const period of (periods ?? []) as BudgetPeriod[]) {
-    const spend = periodSpend((txns ?? []) as Txn[], period);
-    const diff = period.amount - spend; // positive = under budget, negative = over
-    const status = diff >= 0 ? 'Under budget' : 'Over budget';
+  for (const t of txns ?? []) {
     rows.push(
       [
-        period.start_date,
-        period.end_date,
-        period.amount.toFixed(2),
-        spend.toFixed(2),
-        diff.toFixed(2),
-        status,
+        t.posted_at,
+        t.description,
+        t.merchant ?? '',
+        t.category,
+        t.amount.toFixed(2),
+        t.pending ? 'Yes' : 'No',
+        t.excluded ? 'Yes' : 'No',
       ]
         .map(csvEscape)
         .join(',')
@@ -61,7 +53,7 @@ export async function GET() {
   return new NextResponse(csv, {
     headers: {
       'Content-Type': 'text/csv',
-      'Content-Disposition': `attachment; filename="budget-history-${new Date()
+      'Content-Disposition': `attachment; filename="transactions-${new Date()
         .toISOString()
         .slice(0, 10)}.csv"`,
     },
