@@ -26,20 +26,20 @@ export default function SetupHousehold() {
       return setError('Your session expired — try signing in again.');
     }
 
-    const { data: household, error: hhError } = await supabase
-      .from('households')
-      .insert({ name: 'Our Household' })
-      .select('id')
-      .single();
+    const householdId = crypto.randomUUID();
 
-    if (hhError || !household) {
+    const { error: hhError } = await supabase
+      .from('households')
+      .insert({ id: householdId, name: 'Our Household' });
+
+    if (hhError) {
       setLoading(false);
-      return setError(hhError?.message ?? 'Could not create household');
+      return setError(hhError.message);
     }
 
     const { error: memberError } = await supabase
       .from('household_members')
-      .insert({ user_id: user.id, household_id: household.id });
+      .insert({ user_id: user.id, household_id: householdId });
 
     setLoading(false);
 
@@ -47,7 +47,7 @@ export default function SetupHousehold() {
       return setError(memberError.message);
     }
 
-    setNotice(`Household created! Share this code with your partner: ${household.id}`);
+    setNotice(`Household created! Share this code with your partner: ${householdId}`);
     setTimeout(() => {
       router.refresh();
     }, 4000);
