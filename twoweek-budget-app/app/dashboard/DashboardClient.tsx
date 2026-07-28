@@ -8,6 +8,7 @@ import {
   nextPeriodDefaults,
   periodSpend,
   categoryBreakdown,
+  isoDate,
   type BudgetPeriod,
   type Txn,
 } from '@/lib/budget';
@@ -26,9 +27,15 @@ export default function DashboardClient({
 
   const [syncing, setSyncing] = useState(false);
   const [syncMsg, setSyncMsg] = useState<string | null>(null);
+  const [syncIsError, setSyncIsError] = useState(false);
   const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
   const [connected, setConnected] = useState<boolean | null>(null);
   const [showNewPeriod, setShowNewPeriod] = useState(!currentPeriod);
+  const [selectedPeriodId, setSelectedPeriodId] = useState<string | null>(
+    currentPeriod?.id ?? allPeriods[0]?.id ?? null
+  );
+  const [deleting, setDeleting] = useState(false);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
 
   useEffect(() => {
     fetch('/api/sync-status')
@@ -40,20 +47,25 @@ export default function DashboardClient({
       .catch(() => {});
   }, []);
 
-  const spend = currentPeriod ? periodSpend(transactions, currentPeriod) : 0;
-  const remaining = currentPeriod ? currentPeriod.amount - spend : 0;
-  const pctUsed = currentPeriod ? Math.min(100, (spend / currentPeriod.amount) * 100) : 0;
+  // The period currently being viewed — defaults to today's period, but can
+  // be switched to any past or future period via the dropdown below.
+  const viewedPeriod = allPeriods.find((p) => p.id === selectedPeriodId) ?? null;
+  const today = isoDate(new Date());
+
+  const spend = viewedPeriod ? periodSpend(transactions, viewedPeriod) : 0;
+  const remaining = viewedPeriod ? viewedPeriod.amount - spend : 0;
+  const pctUsed = viewedPeriod ? Math.min(100, (spend / viewedPeriod.amount) * 100) : 0;
   const overBudget = remaining < 0;
-  const breakdown = currentPeriod ? categoryBreakdown(transactions, currentPeriod) : [];
+  const breakdown = viewedPeriod ? categoryBreakdown(transactions, viewedPeriod) : [];
 
   const periodTxns = useMemo(
     () =>
-      currentPeriod
+      viewedPeriod
         ? transactions
-            .filter((t) => t.posted_at >= currentPeriod.start_date && t.posted_at <= currentPeriod.end_date)
+            .filter((t) => t.posted_at >= viewedPeriod.start_date && t.posted_at <= viewedPeriod.end_date)
             .sort((a, b) => (a.posted_at < b.posted_at ? 1 : -1))
         : [],
-    [transactions, currentPeriod]
+    [transactions, viewedPeriod]
   );
 
   async function handleSync() {
@@ -63,15 +75,30 @@ export default function DashboardClient({
       const res = await fetch('/api/sync', { method: 'POST' });
       const data = await res.json();
       if (data.error) {
+        setSyncIsError(true);
         setSyncMsg(data.error);
       } else {
+        setSyncIsError(false);
         setSyncMsg(`Synced ${data.synced} transactions.`);
         router.refresh();
       }
     } catch {
+      setSyncIsError(true);
       setSyncMsg('Sync failed — check your connection and try again.');
     } finally {
       setSyncing(false);
+    }
+  }
+
+  async function handleDelete() {
+    if (!viewedPeriod) return;
+    setDeleting(true);
+    const { error } = await supabase.from('budget_periods').delete().eq('id', viewedPeriod.id);
+    setDeleting(false);
+    setConfirmingDelete(false);
+    if (!error) {
+      setSelectedPeriodId(null);
+      router.refresh();
     }
   }
 
@@ -120,25 +147,72 @@ export default function DashboardClient({
             {syncing ? 'Syncing…' : 'Sync now'}
           </button>
         </div>
-        {syncMsg && <p className="text-xs text-ledger-rust -mt-4">{syncMsg}</p>}
+        {syncMsg && (
+          <p className={`text-xs -mt-4 ${syncIsError ? 'text-ledger-rust' : 'text-ledger-green'}`}>
+            {syncMsg}
+          </p>
+        )}
 
-        {/* Current period summary */}
-        {currentPeriod ? (
+        {/* Period picker */}
+        {allPeriods.length > 0 && (
+          <div className="flex items-center justify-between gap-3">
+            <select
+              value={selectedPeriodId ?? ''}
+              onChange={(e) => setSelectedPeriodId(e.target.value)}
+              className="flex-1 border border-ledger-rule rounded-sm px-3 py-2 text-sm bg-white"
+            >
+              {allPeriods.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {formatRange(p.start_date, p.end_date)}
+                  {p.start_date <= today && today <= p.end_date ? ' (current)' : ''}
+                </option>
+              ))}
+            </select>
+            <button
+              onClick={() => setShowNewPeriod((s) => !s)}
+              className="text-xs text-ledger-green hover:underline whitespace-nowrap"
+            >
+              {showNewPeriod ? 'Cancel' : '+ New period'}
+            </button>
+          </div>
+        )}
+
+        {/* Period summary */}
+        {viewedPeriod ? (
           <section className="card p-6">
             <div className="flex items-baseline justify-between mb-1">
               <p className="text-xs uppercase tracking-wide text-ledger-muted">
-                {formatRange(currentPeriod.start_date, currentPeriod.end_date)}
+                {formatRange(viewedPeriod.start_date, viewedPeriod.end_date)}
               </p>
-              <button
-                onClick={() => setShowNewPeriod((s) => !s)}
-                className="text-xs text-ledger-green hover:underline"
-              >
-                {showNewPeriod ? 'Cancel' : 'Start new period'}
-              </button>
+              {confirmingDelete ? (
+                <span className="text-xs flex items-center gap-2">
+                  <span className="text-ledger-muted">Delete this period?</span>
+                  <button
+                    onClick={handleDelete}
+                    disabled={deleting}
+                    className="text-ledger-rust hover:underline font-medium"
+                  >
+                    {deleting ? 'Deleting…' : 'Yes, delete'}
+                  </button>
+                  <button
+                    onClick={() => setConfirmingDelete(false)}
+                    className="text-ledger-muted hover:underline"
+                  >
+                    Cancel
+                  </button>
+                </span>
+              ) : (
+                <button
+                  onClick={() => setConfirmingDelete(true)}
+                  className="text-xs text-ledger-muted hover:text-ledger-rust"
+                >
+                  Delete period
+                </button>
+              )}
             </div>
 
             <div className="grid grid-cols-3 gap-4 mt-4">
-              <Stat label="Budget" value={fmtMoney(currentPeriod.amount)} />
+              <Stat label="Budget" value={fmtMoney(viewedPeriod.amount)} />
               <Stat label="Spent" value={fmtMoney(spend)} accent={overBudget ? 'rust' : undefined} />
               <Stat
                 label={overBudget ? 'Over by' : 'Remaining'}
@@ -164,15 +238,16 @@ export default function DashboardClient({
           <NewPeriodForm
             supabase={supabase}
             lastPeriod={allPeriods[0]}
-            onCreated={() => {
+            onCreated={(newId) => {
               setShowNewPeriod(false);
+              setSelectedPeriodId(newId);
               router.refresh();
             }}
           />
         )}
 
         {/* Category breakdown */}
-        {currentPeriod && breakdown.length > 0 && (
+        {viewedPeriod && breakdown.length > 0 && (
           <section className="card p-6">
             <h2 className="font-display text-lg text-ledger-greenDeep mb-4">By category</h2>
             <div className="space-y-3">
@@ -194,8 +269,8 @@ export default function DashboardClient({
           </section>
         )}
 
-        {/* Recent transactions */}
-        {currentPeriod && (
+        {/* Transactions for the viewed period */}
+        {viewedPeriod && (
           <section className="card p-6">
             <h2 className="font-display text-lg text-ledger-greenDeep mb-4">
               Transactions this period
@@ -276,7 +351,7 @@ function NewPeriodForm({
 }: {
   supabase: ReturnType<typeof createClient>;
   lastPeriod?: BudgetPeriod;
-  onCreated: () => void;
+  onCreated: (newId: string) => void;
 }) {
   const defaults = nextPeriodDefaults(lastPeriod);
   const [start, setStart] = useState(defaults.start);
@@ -304,7 +379,9 @@ function NewPeriodForm({
       return setError('Could not find your household.');
     }
 
+    const newId = crypto.randomUUID();
     const { error: insertError } = await supabase.from('budget_periods').insert({
+      id: newId,
       household_id: membership.household_id,
       start_date: start,
       end_date: end,
@@ -314,7 +391,7 @@ function NewPeriodForm({
 
     setSaving(false);
     if (insertError) return setError(insertError.message);
-    onCreated();
+    onCreated(newId);
   }
 
   return (

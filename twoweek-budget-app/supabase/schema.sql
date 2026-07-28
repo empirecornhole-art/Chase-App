@@ -106,6 +106,8 @@ create policy "members can insert budget periods" on budget_periods
   for insert with check (is_household_member(household_id));
 create policy "members can update budget periods" on budget_periods
   for update using (is_household_member(household_id));
+create policy "members can delete budget periods" on budget_periods
+  for delete using (is_household_member(household_id));
 
 create policy "members can view transactions" on transactions
   for select using (is_household_member(household_id));
