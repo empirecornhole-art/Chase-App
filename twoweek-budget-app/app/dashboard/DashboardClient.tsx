@@ -356,13 +356,18 @@ export default function DashboardClient({
           <section className="card p-6">
             <h2 className="font-display text-lg text-ledger-greenDeep mb-4">
               Transactions this period
+              {periodTxns.length > 0 && (
+                <span className="text-xs font-body font-normal text-ledger-muted ml-2">
+                  ({periodTxns.length})
+                </span>
+              )}
             </h2>
             {periodTxns.length === 0 ? (
               <p className="text-sm text-ledger-muted">
                 Nothing synced for this period yet. Try "Sync now" above.
               </p>
             ) : (
-              <div className="divide-y divide-ledger-rule">
+              <div className="divide-y divide-ledger-rule max-h-[360px] overflow-y-auto pr-1">
                 {periodTxns.map((t) => (
                   <TransactionRow
                     key={t.id}
