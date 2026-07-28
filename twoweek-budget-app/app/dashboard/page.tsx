@@ -47,12 +47,18 @@ export default async function DashboardPage() {
     .order('posted_at', { ascending: false })
     .limit(500);
 
+  const { data: categoryBudgets } = await supabase
+    .from('category_budgets')
+    .select('id, period_id, category, amount')
+    .eq('household_id', householdId);
+
   return (
     <DashboardClient
       householdId={householdId}
       currentPeriod={currentPeriod}
       allPeriods={periods ?? []}
       transactions={transactions ?? []}
+      categoryBudgets={categoryBudgets ?? []}
     />
   );
 }

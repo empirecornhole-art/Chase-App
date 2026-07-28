@@ -67,6 +67,18 @@ create table if not exists category_rules (
   unique (household_id, keyword)
 );
 
+-- 7. Per-category budgets — optional sub-budgets within a period
+--    (e.g. Groceries: $400, Dining: $150), scoped to a specific budget period
+create table if not exists category_budgets (
+  id uuid primary key default gen_random_uuid(),
+  household_id uuid not null references households(id) on delete cascade,
+  period_id uuid not null references budget_periods(id) on delete cascade,
+  category text not null,
+  amount numeric(10, 2) not null,
+  created_at timestamptz not null default now(),
+  unique (period_id, category)
+);
+
 -- ============================================================
 -- Row Level Security
 -- ============================================================
@@ -76,6 +88,7 @@ alter table simplefin_connections enable row level security; -- no policies = se
 alter table budget_periods enable row level security;
 alter table transactions enable row level security;
 alter table category_rules enable row level security;
+alter table category_budgets enable row level security;
 
 -- Helper: is the current user a member of this household?
 create or replace function is_household_member(hh_id uuid)
@@ -117,6 +130,12 @@ create policy "members can update transactions" on transactions
 create policy "members can view category rules" on category_rules
   for select using (is_household_member(household_id));
 create policy "members can manage category rules" on category_rules
+  for all using (is_household_member(household_id))
+  with check (is_household_member(household_id));
+
+create policy "members can view category budgets" on category_budgets
+  for select using (is_household_member(household_id));
+create policy "members can manage category budgets" on category_budgets
   for all using (is_household_member(household_id))
   with check (is_household_member(household_id));
 

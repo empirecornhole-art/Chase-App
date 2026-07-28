@@ -11,6 +11,7 @@ import {
   isoDate,
   type BudgetPeriod,
   type Txn,
+  type CategoryBudget,
 } from '@/lib/budget';
 import { DEFAULT_RULES } from '@/lib/categorize';
 
@@ -19,11 +20,13 @@ export default function DashboardClient({
   currentPeriod,
   allPeriods,
   transactions,
+  categoryBudgets,
 }: {
   householdId: string;
   currentPeriod: BudgetPeriod | null;
   allPeriods: BudgetPeriod[];
   transactions: Txn[];
+  categoryBudgets: CategoryBudget[];
 }) {
   const router = useRouter();
   const supabase = createClient();
@@ -156,6 +159,46 @@ export default function DashboardClient({
         spend: periodSpend(transactions, p),
       }));
   }, [allPeriods, transactions, trendMonths]);
+
+  const categoryRows = useMemo(() => {
+    if (!viewedPeriod) return [];
+    const periodBudgets = categoryBudgets.filter((cb) => cb.period_id === viewedPeriod.id);
+    const budgetMap = new Map(periodBudgets.map((cb) => [cb.category, cb.amount]));
+    const spendMap = new Map(breakdown.map((b) => [b.category, b.total]));
+
+    const allCats = new Set([...budgetMap.keys(), ...spendMap.keys()]);
+    return Array.from(allCats)
+      .map((category) => ({
+        category,
+        spent: spendMap.get(category) ?? 0,
+        budgeted: budgetMap.get(category) ?? null,
+      }))
+      .sort((a, b) => b.spent - a.spent);
+  }, [viewedPeriod, categoryBudgets, breakdown]);
+
+  const maxCategoryValue = useMemo(
+    () => Math.max(...categoryRows.map((r) => Math.max(r.spent, r.budgeted ?? 0)), 1),
+    [categoryRows]
+  );
+
+  async function handleSetCategoryBudget(category: string, amount: number) {
+    if (!viewedPeriod) return;
+    await supabase.from('category_budgets').upsert(
+      { household_id: householdId, period_id: viewedPeriod.id, category, amount },
+      { onConflict: 'period_id,category' }
+    );
+    router.refresh();
+  }
+
+  async function handleRemoveCategoryBudget(category: string) {
+    if (!viewedPeriod) return;
+    await supabase
+      .from('category_budgets')
+      .delete()
+      .eq('period_id', viewedPeriod.id)
+      .eq('category', category);
+    router.refresh();
+  }
 
   async function handleSync() {
     setSyncing(true);
@@ -405,66 +448,22 @@ export default function DashboardClient({
           />
         )}
 
-        {/* Spend trend */}
-        {trendData.length > 1 && (
+        {/* Category budgets */}
+        {viewedPeriod && categoryRows.length > 0 && (
           <section className="card p-6">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="font-display text-lg text-ledger-greenDeep">Spend trend</h2>
-              <div className="flex text-xs border border-ledger-rule rounded-sm overflow-hidden">
-                <button
-                  onClick={() => setTrendMonths(3)}
-                  className={`px-2.5 py-1 ${
-                    trendMonths === 3 ? 'bg-ledger-greenDeep text-white' : 'bg-white text-ledger-muted'
-                  }`}
-                >
-                  3 months
-                </button>
-                <button
-                  onClick={() => setTrendMonths(6)}
-                  className={`px-2.5 py-1 border-l border-ledger-rule ${
-                    trendMonths === 6 ? 'bg-ledger-greenDeep text-white' : 'bg-white text-ledger-muted'
-                  }`}
-                >
-                  6 months
-                </button>
-              </div>
-            </div>
-            <TrendChart data={trendData} />
-            <div className="flex items-center gap-4 mt-3 text-[11px] text-ledger-muted">
-              <span className="flex items-center gap-1.5">
-                <span className="inline-block w-3 h-0.5 bg-ledger-muted" style={{ borderTop: '1px dashed' }} />
-                Budget
-              </span>
-              <span className="flex items-center gap-1.5">
-                <span className="inline-block w-3 h-0.5 bg-ledger-green" />
-                Spend (under budget)
-              </span>
-              <span className="flex items-center gap-1.5">
-                <span className="inline-block w-3 h-0.5 bg-ledger-rust" />
-                Spend (over budget)
-              </span>
-            </div>
-          </section>
-        )}
-
-        {/* Category breakdown */}
-        {viewedPeriod && breakdown.length > 0 && (
-          <section className="card p-6">
-            <h2 className="font-display text-lg text-ledger-greenDeep mb-4">By category</h2>
-            <div className="space-y-3">
-              {breakdown.map((b) => (
-                <div key={b.category}>
-                  <div className="flex justify-between text-sm mb-1">
-                    <span>{b.category}</span>
-                    <span className="figure">{fmtMoney(b.total)}</span>
-                  </div>
-                  <div className="h-1.5 rounded-full bg-ledger-rule overflow-hidden">
-                    <div
-                      className="h-full bg-ledger-gold"
-                      style={{ width: `${(b.total / breakdown[0].total) * 100}%` }}
-                    />
-                  </div>
-                </div>
+            <h2 className="font-display text-lg text-ledger-greenDeep mb-1">By category</h2>
+            <p className="text-xs text-ledger-muted mb-4">
+              Tap a category to set or change its budget for this period.
+            </p>
+            <div className="space-y-4">
+              {categoryRows.map((row) => (
+                <CategoryBudgetRow
+                  key={row.category}
+                  row={row}
+                  maxValue={maxCategoryValue}
+                  onSave={(amount) => handleSetCategoryBudget(row.category, amount)}
+                  onRemove={() => handleRemoveCategoryBudget(row.category)}
+                />
               ))}
             </div>
           </section>
@@ -499,6 +498,48 @@ export default function DashboardClient({
                 ))}
               </div>
             )}
+          </section>
+        )}
+
+        {/* Spend trend */}
+        {trendData.length > 1 && (
+          <section className="card p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="font-display text-lg text-ledger-greenDeep">Spend trend</h2>
+              <div className="flex text-xs border border-ledger-rule rounded-sm overflow-hidden">
+                <button
+                  onClick={() => setTrendMonths(3)}
+                  className={`px-2.5 py-1 ${
+                    trendMonths === 3 ? 'bg-ledger-greenDeep text-white' : 'bg-white text-ledger-muted'
+                  }`}
+                >
+                  3 months
+                </button>
+                <button
+                  onClick={() => setTrendMonths(6)}
+                  className={`px-2.5 py-1 border-l border-ledger-rule ${
+                    trendMonths === 6 ? 'bg-ledger-greenDeep text-white' : 'bg-white text-ledger-muted'
+                  }`}
+                >
+                  6 months
+                </button>
+              </div>
+            </div>
+            <TrendChart data={trendData} />
+            <div className="flex items-center gap-4 mt-3 text-[11px] text-ledger-muted">
+              <span className="flex items-center gap-1.5">
+                <span className="inline-block w-3 h-1.5 bg-ledger-muted" style={{ opacity: 0.4 }} />
+                Budget
+              </span>
+              <span className="flex items-center gap-1.5">
+                <span className="inline-block w-3 h-1.5 bg-ledger-green" />
+                Spend (under budget)
+              </span>
+              <span className="flex items-center gap-1.5">
+                <span className="inline-block w-3 h-1.5 bg-ledger-rust" />
+                Spend (over budget)
+              </span>
+            </div>
           </section>
         )}
 
@@ -537,6 +578,98 @@ function Stat({
     <div>
       <p className="text-[11px] uppercase tracking-wide text-ledger-muted mb-1">{label}</p>
       <p className={`figure text-xl ${color}`}>{value}</p>
+    </div>
+  );
+}
+
+function CategoryBudgetRow({
+  row,
+  maxValue,
+  onSave,
+  onRemove,
+}: {
+  row: { category: string; spent: number; budgeted: number | null };
+  maxValue: number;
+  onSave: (amount: number) => void;
+  onRemove: () => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [input, setInput] = useState(row.budgeted != null ? String(row.budgeted) : '');
+
+  const hasBudget = row.budgeted != null;
+  const over = hasBudget && row.spent > (row.budgeted as number);
+  const barColor = hasBudget ? (over ? 'bg-ledger-rust' : 'bg-ledger-green') : 'bg-ledger-gold';
+  const barWidth = hasBudget
+    ? Math.min(100, (row.spent / (row.budgeted as number)) * 100)
+    : (row.spent / maxValue) * 100;
+
+  function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    const amount = parseFloat(input);
+    if (isNaN(amount) || amount < 0) return;
+    onSave(amount);
+    setEditing(false);
+  }
+
+  return (
+    <div>
+      <div className="flex justify-between items-baseline text-sm mb-1">
+        <button
+          onClick={() => setEditing((v) => !v)}
+          className="text-left hover:text-ledger-green"
+        >
+          {row.category}
+        </button>
+        <span className="figure text-xs">
+          {hasBudget ? (
+            <>
+              {fmtMoney(row.spent)} <span className="text-ledger-muted">of {fmtMoney(row.budgeted as number)}</span>
+            </>
+          ) : (
+            <span className="text-ledger-muted">{fmtMoney(row.spent)} · no budget set</span>
+          )}
+        </span>
+      </div>
+      <div className="h-1.5 rounded-full bg-ledger-rule overflow-hidden">
+        <div className={`h-full ${barColor}`} style={{ width: `${barWidth}%` }} />
+      </div>
+
+      {editing && (
+        <form onSubmit={handleSubmit} className="flex items-center gap-2 mt-2">
+          <input
+            autoFocus
+            type="number"
+            step="0.01"
+            min="0"
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            placeholder="Budget amount"
+            className="border border-ledger-rule rounded-sm px-2 py-1 text-xs w-28"
+          />
+          <button type="submit" className="text-xs text-ledger-green hover:underline">
+            Save
+          </button>
+          {hasBudget && (
+            <button
+              type="button"
+              onClick={() => {
+                onRemove();
+                setEditing(false);
+              }}
+              className="text-xs text-ledger-rust hover:underline"
+            >
+              Remove
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => setEditing(false)}
+            className="text-xs text-ledger-muted hover:underline"
+          >
+            Cancel
+          </button>
+        </form>
+      )}
     </div>
   );
 }
@@ -693,63 +826,72 @@ function TrendChart({
   const innerH = height - padTop - padBottom;
 
   const maxVal = Math.max(...data.map((d) => Math.max(d.budget, d.spend)), 1) * 1.1;
-
-  const x = (i: number) => padLeft + (data.length === 1 ? innerW / 2 : (i / (data.length - 1)) * innerW);
   const y = (v: number) => padTop + innerH - (v / maxVal) * innerH;
+  const barH = (v: number) => innerH - (y(v) - padTop);
 
-  const budgetPoints = data.map((d, i) => `${x(i)},${y(d.budget)}`).join(' ');
-  const spendPoints = data.map((d, i) => `${x(i)},${y(d.spend)}`).join(' ');
+  const slotW = innerW / data.length;
+  const groupGap = slotW * 0.2;
+  const barW = (slotW - groupGap) / 2;
 
   const gridLines = [0.25, 0.5, 0.75, 1].map((f) => maxVal * f);
-  // Show every label if few points, else thin them out so they don't overlap.
   const labelEvery = data.length > 8 ? Math.ceil(data.length / 6) : 1;
 
   return (
     <svg viewBox={`0 0 ${width} ${height}`} className="w-full" role="img" aria-label="Spend vs budget trend">
       {gridLines.map((v) => (
         <g key={v}>
-          <line
-            x1={padLeft}
-            x2={width - padRight}
-            y1={y(v)}
-            y2={y(v)}
-            stroke="#DAD5C7"
-            strokeWidth={1}
-          />
+          <line x1={padLeft} x2={width - padRight} y1={y(v)} y2={y(v)} stroke="#DAD5C7" strokeWidth={1} />
           <text x={padLeft - 6} y={y(v) + 3} textAnchor="end" fontSize={9} fill="#7A7A6E">
             {fmtMoney(v).replace('.00', '')}
           </text>
         </g>
       ))}
-
-      <polyline
-        points={budgetPoints}
-        fill="none"
-        stroke="#7A7A6E"
-        strokeWidth={1.5}
-        strokeDasharray="4 3"
+      <line
+        x1={padLeft}
+        x2={width - padRight}
+        y1={padTop + innerH}
+        y2={padTop + innerH}
+        stroke="#DAD5C7"
+        strokeWidth={1}
       />
-      <polyline points={spendPoints} fill="none" stroke="#2F5D45" strokeWidth={2} />
 
-      {data.map((d, i) => (
-        <circle
-          key={d.id}
-          cx={x(i)}
-          cy={y(d.spend)}
-          r={3.5}
-          fill={d.spend > d.budget ? '#B5502F' : '#2F5D45'}
-        >
-          <title>
-            {d.label}: {fmtMoney(d.spend)} spent of {fmtMoney(d.budget)} budgeted
-          </title>
-        </circle>
-      ))}
+      {data.map((d, i) => {
+        const groupX = padLeft + i * slotW + groupGap / 2;
+        const over = d.spend > d.budget;
+        return (
+          <g key={d.id}>
+            <rect
+              x={groupX}
+              y={y(d.budget)}
+              width={barW}
+              height={barH(d.budget)}
+              fill="#7A7A6E"
+              opacity={0.35}
+            >
+              <title>
+                {d.label}: {fmtMoney(d.budget)} budgeted
+              </title>
+            </rect>
+            <rect
+              x={groupX + barW}
+              y={y(d.spend)}
+              width={barW}
+              height={barH(d.spend)}
+              fill={over ? '#B5502F' : '#2F5D45'}
+            >
+              <title>
+                {d.label}: {fmtMoney(d.spend)} spent of {fmtMoney(d.budget)} budgeted
+              </title>
+            </rect>
+          </g>
+        );
+      })}
 
       {data.map((d, i) =>
         i % labelEvery === 0 ? (
           <text
             key={d.id}
-            x={x(i)}
+            x={padLeft + i * slotW + slotW / 2}
             y={height - 8}
             textAnchor="middle"
             fontSize={9}

@@ -43,5 +43,31 @@ export async function autoCreateNextPeriod(householdId: string) {
     amount: lastPeriod.amount,
   });
 
+  if (!error) {
+    // Carry forward category sub-budgets from the previous period too.
+    const { data: newPeriod } = await admin
+      .from('budget_periods')
+      .select('id')
+      .eq('household_id', householdId)
+      .eq('start_date', start)
+      .maybeSingle();
+
+    const { data: oldCategoryBudgets } = await admin
+      .from('category_budgets')
+      .select('category, amount')
+      .eq('period_id', lastPeriod.id);
+
+    if (newPeriod && oldCategoryBudgets && oldCategoryBudgets.length > 0) {
+      await admin.from('category_budgets').insert(
+        oldCategoryBudgets.map((cb) => ({
+          household_id: householdId,
+          period_id: newPeriod.id,
+          category: cb.category,
+          amount: cb.amount,
+        }))
+      );
+    }
+  }
+
   return { created: !error, start, end, amount: lastPeriod.amount };
 }

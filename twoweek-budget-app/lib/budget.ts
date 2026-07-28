@@ -15,6 +15,13 @@ export interface Txn {
   pending: boolean;
 }
 
+export interface CategoryBudget {
+  id: string;
+  period_id: string;
+  category: string;
+  amount: number;
+}
+
 export function fmtMoney(n: number): string {
   return n.toLocaleString('en-US', { style: 'currency', currency: 'USD' });
 }
