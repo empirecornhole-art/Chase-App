@@ -246,7 +246,9 @@ export default function DashboardClient({
         }
         const sub = await reg.pushManager.subscribe({
           userVisibleOnly: true,
-          applicationServerKey: urlBase64ToUint8Array(process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY || ''),
+          applicationServerKey: urlBase64ToUint8Array(
+            process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY || ''
+          ) as BufferSource,
         });
         await fetch('/api/push/subscribe', {
           method: 'POST',
