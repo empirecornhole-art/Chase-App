@@ -47,6 +47,16 @@ export default function DashboardClient({
       .catch(() => {});
   }, []);
 
+  // Keep the dropdown selection valid whenever the period list changes
+  // (e.g. after deleting a period or creating a new one via router.refresh()).
+  useEffect(() => {
+    const stillExists = allPeriods.some((p) => p.id === selectedPeriodId);
+    if (!stillExists) {
+      setSelectedPeriodId(currentPeriod?.id ?? allPeriods[0]?.id ?? null);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [allPeriods, currentPeriod]);
+
   // The period currently being viewed — defaults to today's period, but can
   // be switched to any past or future period via the dropdown below.
   const viewedPeriod = allPeriods.find((p) => p.id === selectedPeriodId) ?? null;
