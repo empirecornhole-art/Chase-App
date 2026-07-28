@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/server';
 import { redirect } from 'next/navigation';
 import DashboardClient from './DashboardClient';
+import SetupHousehold from './SetupHousehold';
 
 export default async function DashboardPage() {
   const supabase = createClient();
@@ -16,16 +17,7 @@ export default async function DashboardPage() {
     .single();
 
   if (!membership) {
-    return (
-      <main className="min-h-screen flex items-center justify-center px-4 text-center">
-        <div>
-          <h1 className="font-display text-2xl mb-2">No household found</h1>
-          <p className="text-ledger-muted text-sm">
-            Something went wrong linking your account to a household. Try signing out and back in.
-          </p>
-        </div>
-      </main>
-    );
+    return <SetupHousehold />;
   }
 
   const householdId = membership.household_id;

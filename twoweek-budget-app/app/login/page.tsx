@@ -13,7 +13,6 @@ export default function LoginPage() {
   const [mode, setMode] = useState<Mode>('signin');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [householdCode, setHouseholdCode] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -29,6 +28,10 @@ export default function LoginPage() {
     router.refresh();
   }
 
+  // Signup ONLY creates the auth account here. Setting up or joining a
+  // household happens on the dashboard, once the user has a real, confirmed
+  // session — that way this works whether or not "Confirm email" is turned
+  // on in Supabase, instead of racing an unauthenticated database write.
   async function handleSignUp(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
@@ -36,43 +39,14 @@ export default function LoginPage() {
     setLoading(true);
 
     const { data, error: signUpError } = await supabase.auth.signUp({ email, password });
+    setLoading(false);
+
     if (signUpError || !data.user) {
-      setLoading(false);
       return setError(signUpError?.message ?? 'Sign up failed');
     }
 
-    let householdId = householdCode.trim();
-
-    if (!householdId) {
-      // First member: create a new household
-      const { data: household, error: hhError } = await supabase
-        .from('households')
-        .insert({ name: 'Our Household' })
-        .select('id')
-        .single();
-      if (hhError || !household) {
-        setLoading(false);
-        return setError(hhError?.message ?? 'Could not create household');
-      }
-      householdId = household.id;
-    }
-
-    const { error: memberError } = await supabase
-      .from('household_members')
-      .insert({ user_id: data.user.id, household_id: householdId });
-    if (memberError) {
-      setLoading(false);
-      return setError(
-        'Account created, but joining the household failed — double check the household code your partner shared.'
-      );
-    }
-
-    setLoading(false);
-
     if (!data.session) {
-      setNotice(
-        `Account created! Check ${email} to confirm your address, then sign in. Your household code is: ${householdId}`
-      );
+      setNotice(`Account created! Check ${email} to confirm your address, then sign in.`);
       setMode('signin');
       return;
     }
@@ -138,21 +112,6 @@ export default function LoginPage() {
               />
             </div>
 
-            {mode === 'signup' && (
-              <div>
-                <label className="block text-xs text-ledger-muted mb-1">
-                  Household code <span className="text-ledger-muted">(leave blank if you're first)</span>
-                </label>
-                <input
-                  type="text"
-                  value={householdCode}
-                  onChange={(e) => setHouseholdCode(e.target.value)}
-                  placeholder="Paste the code your partner shared"
-                  className="w-full border border-ledger-rule rounded-sm px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-ledger-green text-sm"
-                />
-              </div>
-            )}
-
             {error && <p className="text-sm text-ledger-rust">{error}</p>}
             {notice && <p className="text-sm text-ledger-green">{notice}</p>}
 
@@ -163,6 +122,12 @@ export default function LoginPage() {
             >
               {loading ? 'Please wait…' : mode === 'signin' ? 'Sign in' : 'Create account'}
             </button>
+
+            {mode === 'signup' && (
+              <p className="text-xs text-ledger-muted text-center">
+                After signing in, you'll set up a new household or join your partner's.
+              </p>
+            )}
           </form>
         </div>
       </div>
