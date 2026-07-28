@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import {
@@ -39,6 +39,8 @@ export default function DashboardClient({
   );
   const [deleting, setDeleting] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [pullDistance, setPullDistance] = useState(0);
+  const [pullActive, setPullActive] = useState(false);
 
   useEffect(() => {
     fetch('/api/sync-status')
@@ -48,6 +50,48 @@ export default function DashboardClient({
         setConnected(d.connected);
       })
       .catch(() => {});
+  }, []);
+
+  // Custom pull-to-refresh — standalone/installed PWAs on iOS Safari don't
+  // get the browser's native pull-to-refresh gesture or a visible reload
+  // button, so we build a minimal version of both here.
+  const touchStartY = useRef<number | null>(null);
+  const pullRef = useRef(0);
+  const PULL_THRESHOLD = 70;
+
+  useEffect(() => {
+    function onTouchStart(e: TouchEvent) {
+      touchStartY.current = window.scrollY === 0 ? e.touches[0].clientY : null;
+    }
+    function onTouchMove(e: TouchEvent) {
+      if (touchStartY.current === null || window.scrollY > 0) return;
+      const delta = e.touches[0].clientY - touchStartY.current;
+      if (delta > 0) {
+        const capped = Math.min(delta * 0.5, 100);
+        pullRef.current = capped;
+        setPullDistance(capped);
+        setPullActive(true);
+      }
+    }
+    function onTouchEnd() {
+      if (pullRef.current > PULL_THRESHOLD) {
+        window.location.reload();
+        return;
+      }
+      pullRef.current = 0;
+      touchStartY.current = null;
+      setPullDistance(0);
+      setPullActive(false);
+    }
+
+    window.addEventListener('touchstart', onTouchStart, { passive: true });
+    window.addEventListener('touchmove', onTouchMove, { passive: true });
+    window.addEventListener('touchend', onTouchEnd);
+    return () => {
+      window.removeEventListener('touchstart', onTouchStart);
+      window.removeEventListener('touchmove', onTouchMove);
+      window.removeEventListener('touchend', onTouchEnd);
+    };
   }, []);
 
   // Keep the dropdown selection valid whenever the period list changes
@@ -131,15 +175,32 @@ export default function DashboardClient({
 
   return (
     <main className="min-h-screen pb-16">
+      {pullActive && (
+        <div
+          className="flex items-center justify-center overflow-hidden bg-ledger-bg text-xs text-ledger-muted transition-[height]"
+          style={{ height: pullDistance }}
+        >
+          {pullDistance > PULL_THRESHOLD ? 'Release to refresh' : 'Pull to refresh'}
+        </div>
+      )}
       <header className="border-b border-ledger-rule bg-ledger-paper">
         <div className="max-w-3xl mx-auto px-5 py-4 flex items-center justify-between">
           <div>
             <p className="text-[11px] tracking-[0.2em] uppercase text-ledger-muted">Household Budget</p>
             <h1 className="font-display text-xl text-ledger-greenDeep leading-tight">Two-Week Ledger</h1>
           </div>
-          <button onClick={handleSignOut} className="text-xs text-ledger-muted hover:text-ledger-ink">
-            Sign out
-          </button>
+          <div className="flex items-center gap-4">
+            <button
+              onClick={() => window.location.reload()}
+              className="text-xs text-ledger-muted hover:text-ledger-ink flex items-center gap-1"
+              aria-label="Refresh page"
+            >
+              ↻ Refresh
+            </button>
+            <button onClick={handleSignOut} className="text-xs text-ledger-muted hover:text-ledger-ink">
+              Sign out
+            </button>
+          </div>
         </div>
       </header>
 
