@@ -37,6 +37,8 @@ create table if not exists budget_periods (
   end_date date not null,
   amount numeric(10, 2) not null,
   created_by uuid references auth.users(id),
+  heads_up_notified boolean not null default false,
+  over_budget_notified boolean not null default false,
   created_at timestamptz not null default now(),
   unique (household_id, start_date)
 );
@@ -80,6 +82,17 @@ create table if not exists category_budgets (
   unique (period_id, category)
 );
 
+-- 8. Push notification subscriptions — one row per phone/browser that has
+--    enabled alerts, scoped to the individual user (not the household)
+create table if not exists push_subscriptions (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  endpoint text not null unique,
+  p256dh text not null,
+  auth text not null,
+  created_at timestamptz not null default now()
+);
+
 -- ============================================================
 -- Row Level Security
 -- ============================================================
@@ -90,6 +103,7 @@ alter table budget_periods enable row level security;
 alter table transactions enable row level security;
 alter table category_rules enable row level security;
 alter table category_budgets enable row level security;
+alter table push_subscriptions enable row level security;
 
 -- Helper: is the current user a member of this household?
 create or replace function is_household_member(hh_id uuid)
@@ -139,6 +153,10 @@ create policy "members can view category budgets" on category_budgets
 create policy "members can manage category budgets" on category_budgets
   for all using (is_household_member(household_id))
   with check (is_household_member(household_id));
+
+create policy "users manage their own push subscriptions" on push_subscriptions
+  for all using (user_id = auth.uid())
+  with check (user_id = auth.uid());
 
 -- ============================================================
 -- Starter category rules get inserted per-household after signup

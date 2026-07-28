@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { syncHousehold } from '@/lib/sync';
+import { checkAndSendBudgetAlerts } from '@/lib/notifications';
 
 // Pulls fresh data for the *current signed-in user's* household.
 // Used by the "Sync now" button on the dashboard.
@@ -25,5 +26,6 @@ export async function POST() {
   }
 
   const result = await syncHousehold(membership.household_id);
+  await checkAndSendBudgetAlerts(membership.household_id);
   return NextResponse.json(result);
 }

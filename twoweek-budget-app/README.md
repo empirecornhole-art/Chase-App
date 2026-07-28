@@ -60,7 +60,33 @@ Android, Mac, and Windows (no app store needed).
    `/api/cron` to run once daily (13:00 UTC by default — edit the cron
    schedule in `vercel.json` if you want a different time).
 
-## 4. First-time app setup
+## 4. Push notifications (optional)
+
+Two-Week Ledger can send a push notification straight to your phone when:
+- You've used 80% of your budget with 3+ days still left in the period ("heads up")
+- You go over budget
+
+**Important iOS limitation:** push notifications on iPhone only work if the app is
+installed to your Home Screen (Add to Home Screen) — they will **not** work if you
+just open the site in a regular Safari tab. Android/Chrome doesn't have this
+restriction.
+
+**Setup:**
+1. Add the two VAPID keys from `.env.example` to your Vercel environment
+   variables (`NEXT_PUBLIC_VAPID_PUBLIC_KEY` and `VAPID_PRIVATE_KEY`) — these
+   were generated specifically for this app and are ready to use as-is, no
+   need to generate your own.
+2. Deploy.
+3. On each phone, open the app (from the Home Screen icon on iPhone) and tap
+   **"🔕 Enable alerts"** in the top-right of the dashboard. Your browser will
+   ask for notification permission — allow it.
+4. That's it — alerts check automatically once a day (same daily cron as
+   syncing) and also right after you hit "Sync now."
+
+Each phone/browser that taps "Enable alerts" gets its own subscription, so
+both of you can turn this on independently on your own devices.
+
+## 5. First-time app setup
 
 1. Visit your deployed app → **Create account** tab. Leave "household code"
    blank — this makes you the first member and creates a household.

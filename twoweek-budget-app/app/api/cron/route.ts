@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/server';
 import { syncHousehold } from '@/lib/sync';
 import { autoCreateNextPeriod } from '@/lib/periods';
+import { checkAndSendBudgetAlerts } from '@/lib/notifications';
 
 // Called automatically once a day by Vercel Cron (see vercel.json).
 // Protected by CRON_SECRET so nobody else can trigger it.
@@ -21,12 +22,14 @@ export async function GET(request: NextRequest) {
     syncResults.push({ household_id: h.household_id, ...result });
   }
 
-  // Auto-start the next budget period for every household whose current one ended.
+  // Auto-start the next budget period for every household whose current one ended,
+  // then check whether anyone needs a budget alert push notification.
   const { data: allHouseholds } = await admin.from('households').select('id');
   const periodResults = [];
   for (const h of allHouseholds ?? []) {
     const result = await autoCreateNextPeriod(h.id);
     if (result.created) periodResults.push({ household_id: h.id, ...result });
+    await checkAndSendBudgetAlerts(h.id);
   }
 
   return NextResponse.json({

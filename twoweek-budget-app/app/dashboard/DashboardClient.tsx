@@ -48,6 +48,9 @@ export default function DashboardClient({
   const [pullDistance, setPullDistance] = useState(0);
   const [pullActive, setPullActive] = useState(false);
   const [trendMonths, setTrendMonths] = useState<3 | 6>(3);
+  const [pushSupported, setPushSupported] = useState(false);
+  const [pushEnabled, setPushEnabled] = useState(false);
+  const [pushBusy, setPushBusy] = useState(false);
 
   useEffect(() => {
     fetch('/api/sync-status')
@@ -56,6 +59,16 @@ export default function DashboardClient({
         setLastSyncedAt(d.lastSyncedAt);
         setConnected(d.connected);
       })
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
+    setPushSupported(true);
+    navigator.serviceWorker
+      .register('/sw.js')
+      .then((reg) => reg.pushManager.getSubscription())
+      .then((sub) => setPushEnabled(!!sub))
       .catch(() => {});
   }, []);
 
@@ -209,6 +222,46 @@ export default function DashboardClient({
     router.refresh();
   }
 
+  async function handleTogglePush() {
+    setPushBusy(true);
+    try {
+      const reg = await navigator.serviceWorker.register('/sw.js');
+
+      if (pushEnabled) {
+        const sub = await reg.pushManager.getSubscription();
+        if (sub) {
+          await fetch('/api/push/unsubscribe', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ endpoint: sub.endpoint }),
+          });
+          await sub.unsubscribe();
+        }
+        setPushEnabled(false);
+      } else {
+        const permission = await Notification.requestPermission();
+        if (permission !== 'granted') {
+          setPushBusy(false);
+          return;
+        }
+        const sub = await reg.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: urlBase64ToUint8Array(process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY || ''),
+        });
+        await fetch('/api/push/subscribe', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(sub.toJSON()),
+        });
+        setPushEnabled(true);
+      }
+    } catch {
+      // Silently ignore — button just won't flip state if something went wrong.
+    } finally {
+      setPushBusy(false);
+    }
+  }
+
   async function handleSync() {
     setSyncing(true);
     setSyncMsg(null);
@@ -289,6 +342,15 @@ export default function DashboardClient({
             >
               ↻ Refresh
             </button>
+            {pushSupported && (
+              <button
+                onClick={handleTogglePush}
+                disabled={pushBusy}
+                className="text-xs text-ledger-muted hover:text-ledger-ink"
+              >
+                {pushBusy ? '…' : pushEnabled ? '🔔 Alerts on' : '🔕 Enable alerts'}
+              </button>
+            )}
             <button onClick={handleSignOut} className="text-xs text-ledger-muted hover:text-ledger-ink">
               Sign out
             </button>
@@ -952,6 +1014,17 @@ function TrendChart({
       )}
     </svg>
   );
+}
+
+function urlBase64ToUint8Array(base64String: string): Uint8Array {
+  const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const rawData = atob(base64);
+  const outputArray = new Uint8Array(rawData.length);
+  for (let i = 0; i < rawData.length; ++i) {
+    outputArray[i] = rawData.charCodeAt(i);
+  }
+  return outputArray;
 }
 
 function formatRange(start: string, end: string): string {
