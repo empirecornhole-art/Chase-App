@@ -12,12 +12,15 @@ import {
   type BudgetPeriod,
   type Txn,
 } from '@/lib/budget';
+import { DEFAULT_RULES } from '@/lib/categorize';
 
 export default function DashboardClient({
+  householdId,
   currentPeriod,
   allPeriods,
   transactions,
 }: {
+  householdId: string;
   currentPeriod: BudgetPeriod | null;
   allPeriods: BudgetPeriod[];
   transactions: Txn[];
@@ -77,6 +80,14 @@ export default function DashboardClient({
         : [],
     [transactions, viewedPeriod]
   );
+
+  const knownCategories = useMemo(() => {
+    const set = new Set<string>();
+    transactions.forEach((t) => set.add(t.category));
+    DEFAULT_RULES.forEach((r) => set.add(r.category));
+    set.delete('Uncategorized');
+    return Array.from(set).sort();
+  }, [transactions]);
 
   async function handleSync() {
     setSyncing(true);
@@ -292,16 +303,14 @@ export default function DashboardClient({
             ) : (
               <div className="divide-y divide-ledger-rule">
                 {periodTxns.map((t) => (
-                  <div key={t.id} className="py-2.5 flex items-center justify-between text-sm">
-                    <div className="min-w-0">
-                      <p className="truncate">{t.description}</p>
-                      <p className="text-xs text-ledger-muted">
-                        {t.category}
-                        {t.pending ? ' · pending' : ''} · {t.posted_at}
-                      </p>
-                    </div>
-                    <span className="figure ml-3 shrink-0">{fmtMoney(t.amount)}</span>
-                  </div>
+                  <TransactionRow
+                    key={t.id}
+                    txn={t}
+                    supabase={supabase}
+                    householdId={householdId}
+                    knownCategories={knownCategories}
+                    onSaved={() => router.refresh()}
+                  />
                 ))}
               </div>
             )}
@@ -343,6 +352,143 @@ function Stat({
     <div>
       <p className="text-[11px] uppercase tracking-wide text-ledger-muted mb-1">{label}</p>
       <p className={`figure text-xl ${color}`}>{value}</p>
+    </div>
+  );
+}
+
+function TransactionRow({
+  txn,
+  supabase,
+  householdId,
+  knownCategories,
+  onSaved,
+}: {
+  txn: Txn;
+  supabase: ReturnType<typeof createClient>;
+  householdId: string;
+  knownCategories: string[];
+  onSaved: () => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [addingNew, setAddingNew] = useState(false);
+  const [newCategory, setNewCategory] = useState('');
+  const [remember, setRemember] = useState(true);
+  const [saving, setSaving] = useState(false);
+
+  async function saveCategory(category: string) {
+    const trimmed = category.trim();
+    if (!trimmed) return;
+    setSaving(true);
+
+    await supabase.from('transactions').update({ category: trimmed }).eq('id', txn.id);
+
+    // Optionally remember this so future purchases from the same merchant
+    // get auto-categorized the same way next sync.
+    const keyword = (txn.merchant || txn.description).toLowerCase().slice(0, 60);
+    if (remember && keyword) {
+      await supabase
+        .from('category_rules')
+        .upsert(
+          { household_id: householdId, keyword, category: trimmed },
+          { onConflict: 'household_id,keyword' }
+        );
+    }
+
+    setSaving(false);
+    setEditing(false);
+    setAddingNew(false);
+    setNewCategory('');
+    onSaved();
+  }
+
+  return (
+    <div className="py-2.5 flex items-center justify-between text-sm gap-3">
+      <div className="min-w-0 flex-1">
+        <p className="truncate">{txn.description}</p>
+
+        {!editing ? (
+          <button
+            onClick={() => setEditing(true)}
+            className="text-xs text-ledger-muted hover:text-ledger-green underline decoration-dotted"
+          >
+            {txn.category}
+            {txn.pending ? ' · pending' : ''} · {txn.posted_at}
+          </button>
+        ) : (
+          <div className="mt-1.5 space-y-1.5">
+            {!addingNew ? (
+              <select
+                autoFocus
+                defaultValue=""
+                disabled={saving}
+                onChange={(e) => {
+                  if (e.target.value === '__new__') {
+                    setAddingNew(true);
+                  } else if (e.target.value) {
+                    saveCategory(e.target.value);
+                  }
+                }}
+                className="border border-ledger-rule rounded-sm px-2 py-1 text-xs bg-white"
+              >
+                <option value="" disabled>
+                  Choose category…
+                </option>
+                {knownCategories.map((c) => (
+                  <option key={c} value={c}>
+                    {c}
+                  </option>
+                ))}
+                <option value="__new__">+ New category…</option>
+              </select>
+            ) : (
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  saveCategory(newCategory);
+                }}
+                className="flex items-center gap-1.5"
+              >
+                <input
+                  autoFocus
+                  type="text"
+                  value={newCategory}
+                  onChange={(e) => setNewCategory(e.target.value)}
+                  placeholder="New category name"
+                  className="border border-ledger-rule rounded-sm px-2 py-1 text-xs w-36"
+                />
+                <button
+                  type="submit"
+                  disabled={saving || !newCategory.trim()}
+                  className="text-xs text-ledger-green hover:underline disabled:opacity-50"
+                >
+                  Save
+                </button>
+              </form>
+            )}
+
+            <label className="flex items-center gap-1.5 text-[11px] text-ledger-muted">
+              <input
+                type="checkbox"
+                checked={remember}
+                onChange={(e) => setRemember(e.target.checked)}
+                className="h-3 w-3"
+              />
+              Remember for future "{txn.merchant || txn.description}" purchases
+            </label>
+
+            <button
+              onClick={() => {
+                setEditing(false);
+                setAddingNew(false);
+              }}
+              className="text-[11px] text-ledger-muted hover:underline block"
+            >
+              Cancel
+            </button>
+          </div>
+        )}
+      </div>
+      <span className="figure ml-3 shrink-0">{fmtMoney(txn.amount)}</span>
     </div>
   );
 }
