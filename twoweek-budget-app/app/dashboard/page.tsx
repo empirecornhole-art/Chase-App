@@ -2,6 +2,7 @@ import { createClient } from '@/lib/supabase/server';
 import { redirect } from 'next/navigation';
 import DashboardClient from './DashboardClient';
 import SetupHousehold from './SetupHousehold';
+import { autoCreateNextPeriod } from '@/lib/periods';
 
 export default async function DashboardPage() {
   const supabase = createClient();
@@ -21,6 +22,11 @@ export default async function DashboardPage() {
   }
 
   const householdId = membership.household_id;
+
+  // If the most recent period already ended, start the next one automatically
+  // (same amount, next 14 days) rather than waiting for tomorrow's cron run.
+  await autoCreateNextPeriod(householdId);
+
   const today = new Date().toISOString().slice(0, 10);
 
   const { data: periods } = await supabase

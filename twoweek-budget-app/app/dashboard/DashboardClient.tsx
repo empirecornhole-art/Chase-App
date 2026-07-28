@@ -39,8 +39,12 @@ export default function DashboardClient({
   );
   const [deleting, setDeleting] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [editingAmount, setEditingAmount] = useState(false);
+  const [amountInput, setAmountInput] = useState('');
+  const [savingAmount, setSavingAmount] = useState(false);
   const [pullDistance, setPullDistance] = useState(0);
   const [pullActive, setPullActive] = useState(false);
+  const [trendMonths, setTrendMonths] = useState<3 | 6>(3);
 
   useEffect(() => {
     fetch('/api/sync-status')
@@ -133,6 +137,26 @@ export default function DashboardClient({
     return Array.from(set).sort();
   }, [transactions]);
 
+  const trendData = useMemo(() => {
+    const cutoff = new Date();
+    cutoff.setMonth(cutoff.getMonth() - trendMonths);
+    const cutoffStr = isoDate(cutoff);
+
+    return allPeriods
+      .filter((p) => p.start_date >= cutoffStr)
+      .sort((a, b) => (a.start_date < b.start_date ? -1 : 1))
+      .map((p) => ({
+        id: p.id,
+        label: formatRange(p.start_date, p.end_date),
+        shortLabel: new Date(p.start_date + 'T00:00:00').toLocaleDateString('en-US', {
+          month: 'numeric',
+          day: 'numeric',
+        }),
+        budget: p.amount,
+        spend: periodSpend(transactions, p),
+      }));
+  }, [allPeriods, transactions, trendMonths]);
+
   async function handleSync() {
     setSyncing(true);
     setSyncMsg(null);
@@ -163,6 +187,22 @@ export default function DashboardClient({
     setConfirmingDelete(false);
     if (!error) {
       setSelectedPeriodId(null);
+      router.refresh();
+    }
+  }
+
+  async function handleSaveAmount() {
+    if (!viewedPeriod) return;
+    const amount = parseFloat(amountInput);
+    if (isNaN(amount) || amount < 0) return;
+    setSavingAmount(true);
+    const { error } = await supabase
+      .from('budget_periods')
+      .update({ amount })
+      .eq('id', viewedPeriod.id);
+    setSavingAmount(false);
+    if (!error) {
+      setEditingAmount(false);
       router.refresh();
     }
   }
@@ -293,15 +333,52 @@ export default function DashboardClient({
               )}
             </div>
 
-            <div className="grid grid-cols-3 gap-4 mt-4">
-              <Stat label="Budget" value={fmtMoney(viewedPeriod.amount)} />
-              <Stat label="Spent" value={fmtMoney(spend)} accent={overBudget ? 'rust' : undefined} />
-              <Stat
-                label={overBudget ? 'Over by' : 'Remaining'}
-                value={fmtMoney(Math.abs(remaining))}
-                accent={overBudget ? 'rust' : 'green'}
-              />
-            </div>
+            {editingAmount ? (
+              <div className="flex items-center gap-2 mb-4">
+                <span className="text-[11px] uppercase tracking-wide text-ledger-muted">Budget</span>
+                <input
+                  autoFocus
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={amountInput}
+                  onChange={(e) => setAmountInput(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && handleSaveAmount()}
+                  className="border border-ledger-rule rounded-sm px-2 py-1 text-sm w-28 figure"
+                />
+                <button
+                  onClick={handleSaveAmount}
+                  disabled={savingAmount}
+                  className="text-xs text-ledger-green hover:underline"
+                >
+                  {savingAmount ? 'Saving…' : 'Save'}
+                </button>
+                <button
+                  onClick={() => setEditingAmount(false)}
+                  className="text-xs text-ledger-muted hover:underline"
+                >
+                  Cancel
+                </button>
+              </div>
+            ) : (
+              <div className="grid grid-cols-3 gap-4 mt-4">
+                <button
+                  onClick={() => {
+                    setAmountInput(String(viewedPeriod.amount));
+                    setEditingAmount(true);
+                  }}
+                  className="text-left"
+                >
+                  <Stat label="Budget (tap to edit)" value={fmtMoney(viewedPeriod.amount)} />
+                </button>
+                <Stat label="Spent" value={fmtMoney(spend)} accent={overBudget ? 'rust' : undefined} />
+                <Stat
+                  label={overBudget ? 'Over by' : 'Remaining'}
+                  value={fmtMoney(Math.abs(remaining))}
+                  accent={overBudget ? 'rust' : 'green'}
+                />
+              </div>
+            )}
 
             <div className="mt-5 h-2 rounded-full bg-ledger-rule overflow-hidden">
               <div
@@ -326,6 +403,48 @@ export default function DashboardClient({
               router.refresh();
             }}
           />
+        )}
+
+        {/* Spend trend */}
+        {trendData.length > 1 && (
+          <section className="card p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="font-display text-lg text-ledger-greenDeep">Spend trend</h2>
+              <div className="flex text-xs border border-ledger-rule rounded-sm overflow-hidden">
+                <button
+                  onClick={() => setTrendMonths(3)}
+                  className={`px-2.5 py-1 ${
+                    trendMonths === 3 ? 'bg-ledger-greenDeep text-white' : 'bg-white text-ledger-muted'
+                  }`}
+                >
+                  3 months
+                </button>
+                <button
+                  onClick={() => setTrendMonths(6)}
+                  className={`px-2.5 py-1 border-l border-ledger-rule ${
+                    trendMonths === 6 ? 'bg-ledger-greenDeep text-white' : 'bg-white text-ledger-muted'
+                  }`}
+                >
+                  6 months
+                </button>
+              </div>
+            </div>
+            <TrendChart data={trendData} />
+            <div className="flex items-center gap-4 mt-3 text-[11px] text-ledger-muted">
+              <span className="flex items-center gap-1.5">
+                <span className="inline-block w-3 h-0.5 bg-ledger-muted" style={{ borderTop: '1px dashed' }} />
+                Budget
+              </span>
+              <span className="flex items-center gap-1.5">
+                <span className="inline-block w-3 h-0.5 bg-ledger-green" />
+                Spend (under budget)
+              </span>
+              <span className="flex items-center gap-1.5">
+                <span className="inline-block w-3 h-0.5 bg-ledger-rust" />
+                Spend (over budget)
+              </span>
+            </div>
+          </section>
         )}
 
         {/* Category breakdown */}
@@ -556,6 +675,91 @@ function TransactionRow({
       </div>
       <span className="figure ml-3 shrink-0">{fmtMoney(txn.amount)}</span>
     </div>
+  );
+}
+
+function TrendChart({
+  data,
+}: {
+  data: { id: string; label: string; shortLabel: string; budget: number; spend: number }[];
+}) {
+  const width = 640;
+  const height = 220;
+  const padLeft = 48;
+  const padRight = 12;
+  const padTop = 12;
+  const padBottom = 28;
+  const innerW = width - padLeft - padRight;
+  const innerH = height - padTop - padBottom;
+
+  const maxVal = Math.max(...data.map((d) => Math.max(d.budget, d.spend)), 1) * 1.1;
+
+  const x = (i: number) => padLeft + (data.length === 1 ? innerW / 2 : (i / (data.length - 1)) * innerW);
+  const y = (v: number) => padTop + innerH - (v / maxVal) * innerH;
+
+  const budgetPoints = data.map((d, i) => `${x(i)},${y(d.budget)}`).join(' ');
+  const spendPoints = data.map((d, i) => `${x(i)},${y(d.spend)}`).join(' ');
+
+  const gridLines = [0.25, 0.5, 0.75, 1].map((f) => maxVal * f);
+  // Show every label if few points, else thin them out so they don't overlap.
+  const labelEvery = data.length > 8 ? Math.ceil(data.length / 6) : 1;
+
+  return (
+    <svg viewBox={`0 0 ${width} ${height}`} className="w-full" role="img" aria-label="Spend vs budget trend">
+      {gridLines.map((v) => (
+        <g key={v}>
+          <line
+            x1={padLeft}
+            x2={width - padRight}
+            y1={y(v)}
+            y2={y(v)}
+            stroke="#DAD5C7"
+            strokeWidth={1}
+          />
+          <text x={padLeft - 6} y={y(v) + 3} textAnchor="end" fontSize={9} fill="#7A7A6E">
+            {fmtMoney(v).replace('.00', '')}
+          </text>
+        </g>
+      ))}
+
+      <polyline
+        points={budgetPoints}
+        fill="none"
+        stroke="#7A7A6E"
+        strokeWidth={1.5}
+        strokeDasharray="4 3"
+      />
+      <polyline points={spendPoints} fill="none" stroke="#2F5D45" strokeWidth={2} />
+
+      {data.map((d, i) => (
+        <circle
+          key={d.id}
+          cx={x(i)}
+          cy={y(d.spend)}
+          r={3.5}
+          fill={d.spend > d.budget ? '#B5502F' : '#2F5D45'}
+        >
+          <title>
+            {d.label}: {fmtMoney(d.spend)} spent of {fmtMoney(d.budget)} budgeted
+          </title>
+        </circle>
+      ))}
+
+      {data.map((d, i) =>
+        i % labelEvery === 0 ? (
+          <text
+            key={d.id}
+            x={x(i)}
+            y={height - 8}
+            textAnchor="middle"
+            fontSize={9}
+            fill="#7A7A6E"
+          >
+            {d.shortLabel}
+          </text>
+        ) : null
+      )}
+    </svg>
   );
 }
 
